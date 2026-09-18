@@ -4,7 +4,8 @@ __pycache__/
 *.pyc
 *.log
 
-# Generated test-run artifacts
+# Local-only test material and its generated artifacts
+tests/
 reports/
 
 # Local working material, not part of the deployed service
