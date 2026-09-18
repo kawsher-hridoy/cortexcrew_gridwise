@@ -116,6 +116,12 @@ median, p95, and maximum latency.
 
 ## 2. Docker fallback
 
+Image: `ghcr.io/kawsher-hridoy/cortexcrew_gridwise:latest`
+
+Immutable digest:
+`sha256:da4dfb3b42b767468f7df3d83902eda1be93a66fdc8caf695e4875e98964e3b7`
+(also tagged `b6c872d`, the commit it was built from).
+
 ```bash
 docker pull ghcr.io/kawsher-hridoy/cortexcrew_gridwise:latest
 
@@ -125,6 +131,13 @@ docker run --rm -p 8000:8000 \
 
 curl -s http://127.0.0.1:8000/health
 # {"status":"ok"}
+```
+
+To pin the exact image instead of the tag:
+
+```bash
+docker run --rm -p 8000:8000 -e AZURE_AI_API_KEY=<your key> \
+  ghcr.io/kawsher-hridoy/cortexcrew_gridwise@sha256:da4dfb3b42b767468f7df3d83902eda1be93a66fdc8caf695e4875e98964e3b7
 ```
 
 The image binds to `0.0.0.0:8000`, runs as a non-root user, contains no credentials, and
