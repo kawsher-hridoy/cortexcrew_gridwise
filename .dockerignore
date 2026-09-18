@@ -1,0 +1,12 @@
+.env
+.venv/
+.git/
+__pycache__/
+*.pyc
+*.log
+README.md
+.remember/
+BUP_CSE_FEST_2026_Participant_Docs/
+implementation_plan.md
+AGENTS.md
+CLAUDE.md

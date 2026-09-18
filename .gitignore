@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+*.log
+
+# Local working material, not part of the deployed service
+.remember/
+implementation_plan.md
+AGENTS.md
+CLAUDE.md
+BUP_CSE_FEST_2026_Participant_Docs/
