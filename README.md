@@ -119,8 +119,8 @@ median, p95, and maximum latency.
 Image: `ghcr.io/kawsher-hridoy/cortexcrew_gridwise:latest`
 
 Immutable digest:
-`sha256:da4dfb3b42b767468f7df3d83902eda1be93a66fdc8caf695e4875e98964e3b7`
-(also tagged `b6c872d`, the commit it was built from).
+`sha256:91c4a768a921615a7b6998ae21065980890240fb527cd5235944678055d00407`
+(also tagged `bce0a4b`, the commit it was built from).
 
 ```bash
 docker pull ghcr.io/kawsher-hridoy/cortexcrew_gridwise:latest
@@ -137,7 +137,7 @@ To pin the exact image instead of the tag:
 
 ```bash
 docker run --rm -p 8000:8000 -e AZURE_AI_API_KEY=<your key> \
-  ghcr.io/kawsher-hridoy/cortexcrew_gridwise@sha256:da4dfb3b42b767468f7df3d83902eda1be93a66fdc8caf695e4875e98964e3b7
+  ghcr.io/kawsher-hridoy/cortexcrew_gridwise@sha256:91c4a768a921615a7b6998ae21065980890240fb527cd5235944678055d00407
 ```
 
 The image binds to `0.0.0.0:8000`, runs as a non-root user, contains no credentials, and
@@ -271,7 +271,11 @@ are never relaxed, because reduced solar is a physical fact of the scenario.
 
 Rather than reporting raw solver values, the battery flow is rounded, grid import is
 re-derived from the energy balance, and stored energy is accumulated from the initial state.
-Both identities the judge checks most strictly therefore hold by construction. The serialized
+Both identities the judge checks most strictly therefore hold by construction. Each hour's
+energy level is clamped into its reserve-to-capacity band and the flow is backed out of that
+target, so rounding cannot nudge the trajectory past a bound when the solver places a level
+exactly on one. The replay tolerance is set above the worst-case accumulation from that
+rounding and two orders of magnitude inside the judge's 0.01 window. The serialized
 plan is then replayed from scratch by `solve.replay`, which re-checks hour coverage, sign
 conventions, action consistency, balance, transitions, capacity and reserve bounds, rate
 limits, effective-solar limits, every directive, and terminal neutrality. `total_grid_kwh`,
@@ -280,18 +284,26 @@ reported totals cannot disagree with the plan.
 
 ### Failure behaviour
 
-If a constraint set admits no schedule, the service does not fail the request. It re-solves
-through progressively relaxed sets — dropping grid caps, then reserve raises, then battery
-windows — and if none solve, emits an idle-battery schedule that satisfies the base energy
-rules by construction. A physically valid schedule still earns energy-balance, battery, and
-action-consistency credit, whereas an error response earns none. Every relaxation is logged.
+Two failure modes are kept strictly apart.
+
+A **solver infeasibility** means the constraint set genuinely has no solution. The service
+re-solves against progressively looser sets, but a schedule found that way is served only if
+it also passes replay against every original directive. If none does, the request returns a
+controlled error rather than a schedule that quietly ignores a directive: the judge replays
+against ground truth, so the case is lost either way, and the response would otherwise
+misreport which constraints were applied.
+
+A **replay failure** means our own postprocessing disagrees with our own solver. That is a
+defect, never evidence that a directive cannot be met, so it propagates instead of relaxing
+anything. Treating the two as interchangeable is what previously allowed a fraction of a kWh
+of rounding drift to escalate into a large directive violation.
 
 | Condition | Response |
 | --- | --- |
 | Malformed JSON or schema violation | `400` with a short message |
 | Well-formed but no valid plan can exist (initial charge outside the reserve/capacity band) | `422` |
 | Model unreachable, refusing, or output unusable after the repair retry | `500`, sanitized |
-| Constraints infeasible | `200` with a relaxed but valid schedule |
+| No schedule satisfies every interpreted directive | `500`, sanitized |
 
 Errors return only a short message and a request id. Stack traces, prompts, provider payloads,
 and credentials are never included in responses or logs.
