@@ -7,6 +7,7 @@ __pycache__/
 # Local working material, not part of the deployed service
 .remember/
 implementation_plan.md
+review.md
 AGENTS.md
 CLAUDE.md
 BUP_CSE_FEST_2026_Participant_Docs/
