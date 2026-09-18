@@ -164,7 +164,11 @@ class Settings:
         api_key = os.getenv("AZURE_AI_API_KEY", "")
         if not api_key:
             raise RuntimeError("AZURE_AI_API_KEY is not configured")
-        temperature_raw = os.getenv("LLM_TEMPERATURE", "0")
+        # The tested gpt-5.6-terra deployment rejects an explicit temperature, so
+        # it is omitted by default; sending it would waste a round trip on the
+        # first request of every process. Set LLM_TEMPERATURE to pin it on a
+        # deployment that accepts sampling parameters.
+        temperature_raw = os.getenv("LLM_TEMPERATURE", "")
         effort = os.getenv("LLM_REASONING_EFFORT") or None
         return cls(
             base_url=base_url,
@@ -244,6 +248,25 @@ class Interpreter:
     async def close(self) -> None:
         if self._client is not None:
             await self._client.close()
+
+    async def warm_up(self) -> None:
+        """Establish DNS, TLS, and connection state before the first real request.
+
+        Without this the first scored request pays the cold-connection cost,
+        which measurably dominates p95 over a short test run. Failures are
+        ignored: this is an optimization, not a readiness requirement.
+        """
+        try:
+            await self._call(
+                [
+                    {"role": "system", "content": "Reply with the single word ok."},
+                    {"role": "user", "content": "ok"},
+                ],
+                self.settings.model,
+            )
+            logger.info("model connection warmed")
+        except Exception as error:  # noqa: BLE001 - warmup must never break startup
+            logger.warning("model warmup skipped: %s", type(error).__name__)
 
     async def interpret(
         self, notes: Sequence[str], capacity_kwh: float

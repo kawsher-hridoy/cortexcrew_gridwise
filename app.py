@@ -45,15 +45,20 @@ REQUEST_BUDGET_SECONDS = float(os.getenv("REQUEST_BUDGET_SECONDS", "25"))
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Build the shared model client once, without blocking readiness on it."""
+    warmup: asyncio.Task[None] | None = None
     try:
         app.state.interpreter = Interpreter(Settings.from_env())
         logger.info("model interpreter ready")
+        # Fire and forget: readiness must not wait on the provider.
+        warmup = asyncio.create_task(app.state.interpreter.warm_up())
     except Exception as error:  # noqa: BLE001 - never print the key or a traceback
         app.state.interpreter = None
         logger.error("model interpreter unavailable: %s", type(error).__name__)
     try:
         yield
     finally:
+        if warmup is not None and not warmup.done():
+            warmup.cancel()
         interpreter = getattr(app.state, "interpreter", None)
         if interpreter is not None:
             await interpreter.close()
@@ -180,7 +185,7 @@ async def optimize_energy(payload: OptimizeRequest, request: Request) -> Any:
         check_base_feasibility(payload)
     except SemanticRequestError as error:
         logger.info("[%s] semantically invalid request: %s", request_id, error)
-        return _error(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error), request_id)
+        return _error(422, str(error), request_id)
 
     interpreter: Interpreter | None = getattr(request.app.state, "interpreter", None)
     if interpreter is None:
