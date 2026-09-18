@@ -45,6 +45,18 @@ class SemanticRequestError(ValueError):
 # --------------------------------------------------------------------------- #
 
 
+def _not_a_boolean(value: Any) -> Any:
+    """Reject booleans where a number is required.
+
+    Numeric strings are still coerced on purpose: rejecting those would risk
+    returning 400 for a request the judge considers valid, which costs far more
+    than it protects. ``True`` silently becoming 1 kWh is a different matter.
+    """
+    if isinstance(value, bool):
+        raise ValueError("must be a number, not a boolean")
+    return value
+
+
 class HourEntry(BaseModel):
     model_config = _TOLERANT
 
@@ -52,6 +64,10 @@ class HourEntry(BaseModel):
     demand_kwh: float = Field(ge=0, allow_inf_nan=False)
     solar_kwh: float = Field(ge=0, allow_inf_nan=False)
     tariff_bdt_per_kwh: float = Field(ge=0, allow_inf_nan=False)
+
+    _reject_bools = field_validator(
+        "hour", "demand_kwh", "solar_kwh", "tariff_bdt_per_kwh", mode="before"
+    )(_not_a_boolean)
 
 
 class Battery(BaseModel):
@@ -62,6 +78,15 @@ class Battery(BaseModel):
     minimum_energy_kwh: float = Field(ge=0, allow_inf_nan=False)
     max_charge_kwh_per_hour: float = Field(ge=0, allow_inf_nan=False)
     max_discharge_kwh_per_hour: float = Field(ge=0, allow_inf_nan=False)
+
+    _reject_bools = field_validator(
+        "capacity_kwh",
+        "initial_energy_kwh",
+        "minimum_energy_kwh",
+        "max_charge_kwh_per_hour",
+        "max_discharge_kwh_per_hour",
+        mode="before",
+    )(_not_a_boolean)
 
 
 class OptimizeRequest(BaseModel):
@@ -153,6 +178,47 @@ class Directive:
         return {"hours": hours}
 
 
+_DIRECTIVE_TYPES = frozenset(
+    (
+        "solar_reduction",
+        "minimum_battery_reserve",
+        "no_charge_window",
+        "no_discharge_window",
+        "max_grid_window",
+        "no_op",
+    )
+)
+
+# Exact adjustment shape each directive type is allowed to carry.
+_ADJUSTMENT_KEYS: dict[str, frozenset[str]] = {
+    "solar_reduction": frozenset(("hours", "factor")),
+    "minimum_battery_reserve": frozenset(("hours", "minimum_energy_kwh")),
+    "no_charge_window": frozenset(("hours",)),
+    "no_discharge_window": frozenset(("hours",)),
+    "max_grid_window": frozenset(("hours", "max_grid_kwh")),
+}
+
+
+def _reject_foreign_keys(adjustment: dict[str, Any], directive_type: str) -> None:
+    """Enforce the exact adjustment shape for the declared directive type.
+
+    Keys carrying a null are tolerated, because the provider's structured-output
+    mode fills every field of one flat object and nulls the unused ones. A key
+    with real data that this type does not define means the model conflated two
+    directives, which is worth a repair retry rather than a silent discard.
+    """
+    allowed = _ADJUSTMENT_KEYS[directive_type]
+    foreign = sorted(
+        key
+        for key, value in adjustment.items()
+        if key not in allowed and value is not None
+    )
+    if foreign:
+        raise GuardrailError(
+            f"{directive_type} does not accept {', '.join(foreign)}"
+        )
+
+
 def _finite(value: Any, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise GuardrailError(f"{label} must be a number")
@@ -205,15 +271,11 @@ def validate_directive(
     if note_index != expected_index:
         raise GuardrailError("interpretations must be ordered 0..N-1 with no gaps")
 
+    # The isinstance check comes first on purpose: testing membership of an
+    # unhashable value such as a dict raises TypeError, which would escape
+    # GuardrailError and skip the repair retry.
     directive_type = raw.get("directive_type")
-    if directive_type not in {
-        "solar_reduction",
-        "minimum_battery_reserve",
-        "no_charge_window",
-        "no_discharge_window",
-        "max_grid_window",
-        "no_op",
-    }:
+    if not isinstance(directive_type, str) or directive_type not in _DIRECTIVE_TYPES:
         raise GuardrailError("directive_type is not a supported value")
 
     applies = raw.get("applies")
@@ -242,6 +304,7 @@ def validate_directive(
     if not isinstance(adjustment, dict):
         raise GuardrailError(f"{directive_type} requires a structured_adjustment object")
 
+    _reject_foreign_keys(adjustment, directive_type)
     hours = _normalize_hours(adjustment.get("hours"), directive_type)
 
     if directive_type == "solar_reduction":

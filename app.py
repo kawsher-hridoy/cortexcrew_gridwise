@@ -30,7 +30,7 @@ from schemas import (
     SemanticRequestError,
     check_base_feasibility,
 )
-from solve import solve, summarize
+from solve import Infeasible, ReplayError, solve, summarize
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
@@ -167,7 +167,11 @@ def _build_response(
         total_cost_bdt=solution.totals.total_cost_bdt,
         peak_grid_kwh=solution.totals.peak_grid_kwh,
         plan_summary=summarize(
-            directives, solution.plan, solution.totals, solution.compiled
+            directives,
+            solution.plan,
+            solution.totals,
+            solution.compiled,
+            solution.stage,
         ),
     )
 
@@ -227,4 +231,19 @@ async def optimize_energy(payload: OptimizeRequest, request: Request) -> Any:
 
     # The solver and replay are pure CPU work measured in single-digit
     # milliseconds, so they run inline rather than on a worker thread.
-    return _build_response(payload, directives)
+    try:
+        return _build_response(payload, directives)
+    except Infeasible as error:
+        logger.error("[%s] no schedule satisfies the directives: %s", request_id, error)
+        return _error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "no schedule satisfies every interpreted directive",
+            request_id,
+        )
+    except ReplayError as error:
+        logger.error("[%s] schedule failed self-verification: %s", request_id, error)
+        return _error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "could not produce a verified schedule",
+            request_id,
+        )

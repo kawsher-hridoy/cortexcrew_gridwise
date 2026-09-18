@@ -219,10 +219,11 @@ def _coerce(payload: Any) -> Any:
         if not isinstance(entry, dict):
             raise GuardrailError("interpretation entry must be an object")
         item = dict(entry)
-        if item.get("directive_type") == "no_op":
-            item["structured_adjustment"] = None
-        else:
-            item["structured_adjustment"] = _strip_nulls(item.get("structured_adjustment"))
+        # Applied uniformly, including to no_op. Force-nulling a no_op
+        # adjustment would erase the evidence that the model filled in real
+        # hours or a real cap while still labelling the note irrelevant, and
+        # that contradiction is worth a repair retry.
+        item["structured_adjustment"] = _strip_nulls(item.get("structured_adjustment"))
         coerced.append(item)
     return coerced
 

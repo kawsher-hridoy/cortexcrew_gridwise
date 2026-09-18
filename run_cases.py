@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import statistics
 import sys
 import time
@@ -88,6 +89,12 @@ def post(url: str, payload: dict[str, Any], timeout: float) -> tuple[int, Any]:
             return error.code, json.loads(raw)
         except json.JSONDecodeError:
             return error.code, raw.decode("utf-8", "replace")
+    except json.JSONDecodeError as error:
+        return 200, f"response was not valid JSON: {error}"
+    except OSError as error:
+        # Unreachable service, reset connection, or timeout: report it as a
+        # failed case rather than aborting the whole run with a traceback.
+        return 0, str(error)
 
 
 def run_live(cases: list[dict[str, Any]], base_url: str, timeout: float) -> int:
@@ -174,6 +181,12 @@ def check_live_body(case: dict[str, Any], body: Any) -> list[str]:
                 f"but received {got.get('directive_type')} "
                 f"{got.get('structured_adjustment')}"
             )
+        # Wording is not compared, but the field is required by the schema.
+        explanation = got.get("explanation")
+        if not isinstance(explanation, str) or not explanation.strip():
+            problems.append(
+                f"note {want['note_index']} is missing a non-empty explanation"
+            )
 
     # Replay the returned schedule against the organizer ground-truth directives.
     truth = validate_batch(
@@ -195,7 +208,14 @@ def check_live_body(case: dict[str, Any], body: Any) -> list[str]:
         ("peak_grid_kwh", totals.peak_grid_kwh),
     ):
         reported = body.get(field)
-        if not isinstance(reported, (int, float)) or abs(reported - derived) > TOLERANCE:
+        # isfinite is checked explicitly: every comparison against NaN is False,
+        # so a NaN total would otherwise slip through as a match.
+        if (
+            not isinstance(reported, (int, float))
+            or isinstance(reported, bool)
+            or not math.isfinite(reported)
+            or abs(reported - derived) > TOLERANCE
+        ):
             problems.append(f"{field} {reported} does not match replay {derived:.4f}")
 
     if abs(totals.total_cost_bdt - expected["total_cost_bdt"]) > TOLERANCE:
