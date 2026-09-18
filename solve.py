@@ -497,8 +497,10 @@ def summarize(
     else:
         parts.append("No operator note changed the schedule.")
     if ignored:
-        noun = "note" if ignored == 1 else "notes"
-        parts.append(f"Treated {ignored} unrelated {noun} as no-ops.")
+        if ignored == 1:
+            parts.append("Treated 1 unrelated note as a no-op.")
+        else:
+            parts.append(f"Treated {ignored} unrelated notes as no-ops.")
 
     charge_hours = [e.hour for e in plan if e.battery_action == "charge"]
     discharge_hours = [e.hour for e in plan if e.battery_action == "discharge"]
