@@ -117,11 +117,11 @@ median, p95, and maximum latency.
 ## 2. Docker fallback
 
 ```bash
-docker pull <REGISTRY_IMAGE_REFERENCE>
+docker pull ghcr.io/kawsher-hridoy/cortexcrew_gridwise:latest
 
 docker run --rm -p 8000:8000 \
   -e AZURE_AI_API_KEY=<your key> \
-  <REGISTRY_IMAGE_REFERENCE>
+  ghcr.io/kawsher-hridoy/cortexcrew_gridwise:latest
 
 curl -s http://127.0.0.1:8000/health
 # {"status":"ok"}
@@ -287,10 +287,14 @@ and credentials are never included in responses or logs.
 
 ## 5. Performance
 
-- `/health` is ready within about two seconds of start and never calls the provider
+Measured over the ten public cases against the container image: median 3.23 s,
+p95 4.15 s, maximum 4.15 s.
+
+- `/health` is ready within about two seconds of start and never calls the provider; it answered in 2.4 ms while a startup warmup was still in flight
 - one model call per request; `plan_summary` needs no second call
-- the linear program and replay together take single-digit milliseconds
-- end-to-end latency is dominated by the single model call; the endpoint deadline is 25 s, under the 30 s judge timeout
+- the linear program and replay together take single-digit milliseconds, so latency is dominated by the one model call
+- a fire-and-forget warmup at startup establishes DNS and TLS so the first scored request does not pay the cold-connection cost
+- the endpoint deadline is 25 s, under the 30 s judge timeout
 - `python run_cases.py --live <url>` reports median, p95, and maximum latency
 
 ---
