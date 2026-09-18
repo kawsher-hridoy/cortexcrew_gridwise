@@ -4,6 +4,9 @@ __pycache__/
 *.pyc
 *.log
 
+# Generated test-run artifacts
+reports/
+
 # Local working material, not part of the deployed service
 .remember/
 implementation_plan.md

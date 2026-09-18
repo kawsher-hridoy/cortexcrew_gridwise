@@ -9,6 +9,16 @@ constraints, and returns a cost-minimal 24-hour electricity schedule.
 - `GET /health` → `{"status":"ok"}`
 - `POST /optimize-energy` → directive interpretation + 24-hour plan
 
+**Live endpoint:** `http://20.220.24.121` (plain HTTP, no TLS on this host)
+
+```bash
+curl -s http://20.220.24.121/health
+# {"status":"ok"}
+```
+
+Credentials are already configured there, so it exercises the full pipeline with no setup.
+See section 2 for the container fallback and what it can do without a key.
+
 ---
 
 ## 1. Quickstart from a clean environment
@@ -101,16 +111,23 @@ python run_cases.py --offline
 It injects each published directive interpretation and checks that the optimizer reaches the
 published optimal cost. Expected result: `10/10 cases passed`, every delta `+0.0000`.
 
-The live lane exercises the whole pipeline against a running service:
+The live lane exercises the whole pipeline against any running service, local or deployed:
 
 ```bash
-python run_cases.py --live http://127.0.0.1:8000
+python run_cases.py --live http://127.0.0.1:8000     # your own instance
+python run_cases.py --live http://20.220.24.121      # the deployed endpoint
 ```
+
+Expected result either way: `10/10 cases passed`, every delta `+0.0000`.
 
 For each case it compares directive semantics against the published ground truth (explanation
 wording is not compared), replays the returned schedule against the ground-truth directives,
 checks the three reported totals against the replay, confirms the cost is optimal, and reports
-median, p95, and maximum latency.
+median, p95, and maximum latency. The replay is the important part: it verifies the schedule
+independently rather than trusting the totals the service reported.
+
+Both lanes need the dependencies installed, since the runner replays schedules locally. Use
+the virtual environment created above, or `.venv/bin/python run_cases.py ...` directly.
 
 ---
 
@@ -142,6 +159,28 @@ docker run --rm -p 8000:8000 -e AZURE_AI_API_KEY=<your key> \
 
 The image binds to `0.0.0.0:8000`, runs as a non-root user, contains no credentials, and
 carries its own `HEALTHCHECK`. `AZURE_AI_API_KEY` must be supplied at runtime.
+
+### What the image does without a key
+
+No credentials are baked into the image, so a freshly pulled container behaves as follows.
+This is intended, not a defect:
+
+| Endpoint | Without `AZURE_AI_API_KEY` |
+| --- | --- |
+| `GET /health` | `200 {"status":"ok"}` — readiness is deliberately independent of the model provider, so the container reports ready as soon as it can serve |
+| `POST /optimize-energy` | controlled `500` with `{"error":"note interpretation is unavailable"}` |
+
+The second row follows from the challenge itself: a language model must interpret every
+operator note, so with no way to reach one the service returns a clean error rather than
+guessing directives or crashing. Startup logs the failure as an error class only, never the
+configuration value.
+
+To exercise the full pipeline there are two options:
+
+1. Pass any valid Azure AI Foundry key for a `gpt-5.6-terra` deployment:
+   `-e AZURE_AI_API_KEY=<key>`. Startup then logs `model connection warmed` once it has
+   reached the provider.
+2. Use the live endpoint `http://20.220.24.121`, which is already configured.
 
 To build it locally instead:
 
